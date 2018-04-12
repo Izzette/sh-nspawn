@@ -1,12 +1,11 @@
 #!/bin/bash
 
 declare -r progname="$0"
+
+declare -r init='/sbin/init'
+
 declare    bridge rootfs_path ip_addr route
 declare    cmd
-
-function get_init() {
-  echo "$1/sbin/init"
-}
 
 function get_dev_path() {
   echo "$1/dev"
@@ -51,7 +50,7 @@ function validate_rootfs_path() {
     return 1
   fi
   # shellcheck disable=SC2155
-  declare init="$(get_init "$1")"
+  declare init="$1$init"
   if ! [[ -f "$init" && -r "$init" && -x "$init" ]]; then
     echo "System init binary does not exist or is not executable at $init!" >&2
     echo "Is this an operating system container?" \
@@ -170,7 +169,7 @@ function bootstrap_payload() {
 
   declare exec_cmd=(
     unshare --ipc --uts --cgroup --pid --fork
-    chroot "$rootfs_path" /sbin/init)
+    chroot "$rootfs_path" "$init")
   declare socat_exec_opts='pty,ctty,rawer,stderr,sane,setsid,sigint'
 
   # shellcheck disable=SC2140
