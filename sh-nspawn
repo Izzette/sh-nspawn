@@ -180,13 +180,20 @@ function bootstrap_payload() {
     EXEC:"${exec_cmd[*]}","$socat_exec_opts"
 }
 
+function create_init_netns() {
+  mkdir -p '/var/run/netns'
+  if ! [[ -f '/proc/1/ns/net' ]]; then
+    ln -s "/proc/1/ns/net" "/var/run/netns/1"
+  fi
+}
+
 # TODO: this sucks, find a better solution.
 function find_host_veth() {
   declare host_veth
 
   while :; do
     host_veth="$(printf 'veth%x\n' "$RANDOM")"
-    if ! ip link show "$host_veth" &> /dev/null; then
+    if ! ip -n 1 link show "$host_veth" &> /dev/null; then
       echo "$host_veth"
       break
     fi
@@ -194,11 +201,6 @@ function find_host_veth() {
 }
 
 function create_veth_pair() {
-  mkdir -p '/var/run/netns'
-  if ! [[ -f '/proc/1/ns/net' ]]; then
-    ln -s "/proc/1/ns/net" "/var/run/netns/1"
-  fi
-
   declare raw_ip="${ip_addr%/*}"
   # shellcheck disable=SC2155
   declare host_veth="$(find_host_veth)"
@@ -225,6 +227,7 @@ function stage1() {
 
 function stage2() {
   setup_mounts
+  create_init_netns
   create_veth_pair
   bootstrap_payload
 }
