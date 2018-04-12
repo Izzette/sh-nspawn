@@ -14,7 +14,6 @@ function get_dev_path() {
 function check_prereqs() {
   declare prereqs=(
     ip  # iproute2
-    brctl  # bridge-utils
     unshare mount umount  # util-linux
     socat  # socat
   )
@@ -36,9 +35,9 @@ function check_root() {
 }
 
 function validate_bridge() {
-  if ! brctl showstp "$1" &> /dev/null; then
+  if ! ip link show "$1" &> /dev/null; then
     echo "Could not find bridge device $1!" >&2
-    echo "Did you create it with \`brctl addbr $1'?" >&2
+    echo "Did you create it with \`ip link add name $1 type bridge'?" >&2
     return 1
   fi
   return 0
