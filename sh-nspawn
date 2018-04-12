@@ -11,6 +11,7 @@ function get_dev_path() {
   echo "$1/dev"
 }
 
+# Check for prerequisite binaries.
 function check_prereqs() {
   declare prereqs=(
     ip  # iproute2
@@ -43,6 +44,7 @@ function validate_bridge() {
   return 0
 }
 
+# Ensure the rootfs exists and has an init binary.
 function validate_rootfs_path() {
   if ! [[ -d "$1" && -r "$1" && -x "$1" ]]; then
     echo "Root path $1 does not exist or is unreadable!" >&2
@@ -88,6 +90,7 @@ function parse_args() {
         rootfs_path="$OPTARG"
         ;;
       'a')
+        # with CIDR netmask.
         validate_ipv4_addr "$OPTARG" || exit 2
         ip_addr="$OPTARG"
         ;;
@@ -110,6 +113,7 @@ function parse_args() {
     esac
   done
 
+  # Remove the processed options.
   shift $((OPTIND - 1))
   cmd="$1"
 
@@ -120,14 +124,16 @@ function parse_args() {
   fi
 }
 
+# Setup a new /dev filesystem for the container.
 function prepare_devtmpfs() {
   # shellcheck disable=SC2155
   declare dev_path="$(get_dev_path "$rootfs_path")"
 
-  # create a fake devtmpfs
+  # Create a fake devtmpfs.
   mount -t tmpfs -o nosuid,mode=755 devtmpfs "$dev_path"
 
-  # create and mount /dev/pts and /dev/shm
+  # Create and mount /dev/pts and /dev/shm.  The /dev/pts file system will not
+  # contain any of the existing PTY devices.
   mkdir "$dev_path/pts" "$dev_path/shm"
   mount -t devpts -o nosuid,noexec devpts "$dev_path/pts"
   mount -t tmpfs -o nosuid,nodev tmpfs "$dev_path/shm"
@@ -137,11 +143,11 @@ function prepare_devtmpfs() {
   ln -s '/proc/self/fd/1' "$dev_path/stdout"
   ln -s '/proc/self/fd/2' "$dev_path/stderr"
 
-  # pty created by socat is gurenteed to be 0
+  # PTY created by socat is gurenteed to be 0.
   ln -s 'pts/0' "$dev_path/console"
 
   mknod -m 0666 "$dev_path/tty" c 5 0
-  mknod -m 0666 "$dev_path/ptmx" c 5 2
+  mknod -m 0666 "$dev_path/ptmx" c 5 2  # PTY controller.
 
   mknod -m 0666 "$dev_path/null" c 1 3
   mknod -m 0666 "$dev_path/zero" c 1 5
@@ -150,18 +156,24 @@ function prepare_devtmpfs() {
   mknod -m 0666 "$dev_path/urandom" c 1 9
 }
 
+# Mount the nessesary runtime mounts to the container rootfs, bind mount them to
+# the host where appropriate.  This will be run from the containers mount
+# namespace, so it's mostly safe to mess with existing mountpoints.
 function setup_mounts() {
   # shellcheck disable=SC2155
   declare dev_path="$(get_dev_path "$rootfs_path")"
 
   prepare_devtmpfs
 
-  # Replace this roots /dev with the childs dev.
+  # Replace this roots /dev and /dev/pts with the child's.  We need to do this
+  # so that socat can create a PTY device that works from both the host root and
+  # the container's root.
   umount -R /dev
   mount --bind "$dev_path" /dev
   mount --bind "$dev_path/pts" /dev/pts
 }
 
+# Starts the container.
 function bootstrap_payload() {
   # shellcheck disable=SC2155
   declare dev_path="$(get_dev_path "$rootfs_path")"
@@ -177,6 +189,7 @@ function bootstrap_payload() {
     EXEC:"${exec_cmd[*]}","$socat_exec_opts"
 }
 
+# Create a named net namespace compatible with ip's `-n' option.
 function create_init_netns() {
   mkdir -p '/var/run/netns'
   if ! [[ -f '/proc/1/ns/net' ]]; then
@@ -184,6 +197,7 @@ function create_init_netns() {
   fi
 }
 
+# Find a free veth device on the host.
 # TODO: this sucks, find a better solution.
 function find_host_veth() {
   declare host_veth
@@ -197,6 +211,10 @@ function find_host_veth() {
   done
 }
 
+# Create a veth pair.  This is run from the container's net namespace, so we
+# need to use setns() to PID 1's net namespace.  This will also bridge the host
+# veth to the specified bridge and set the IP address and routes for the
+# container veth.  The container veth is always named eth0.
 function create_veth_pair() {
   declare raw_ip="${ip_addr%/*}"
   # shellcheck disable=SC2155
@@ -213,6 +231,7 @@ function create_veth_pair() {
   ip route add default via "$route" dev eth0 src "$raw_ip"
 }
 
+# Unshare some namespaces and then execute stage2.
 function stage1() {
   exec unshare --mount --net -- "$progname" \
     -b "$bridge" \
