@@ -14,7 +14,6 @@ function get_dev_path() {
 
 function check_prereqs() {
   declare prereqs=(
-    chroot tty mknod whoami readlink wc  # coreutils
     ip  # iproute2
     brctl  # bridge-utils
     unshare mount umount  # util-linux
