@@ -1,0 +1,254 @@
+#!/bin/bash
+
+declare -r progname="$0"
+declare    bridge rootfs_path ip_addr route
+declare    cmd
+
+function get_init() {
+  echo "$1/sbin/init"
+}
+
+function get_dev_path() {
+  echo "$1/dev"
+}
+
+function check_prereqs() {
+  declare prereqs=(
+    chroot tty mknod whoami readlink wc  # coreutils
+    ip  # iproute2
+    brctl  # bridge-utils
+    unshare mount umount  # util-linux
+    socat  # socat
+  )
+
+  declare req
+  for req in "${prereqs[@]}"; do
+    if ! command -v "$req" &> /dev/null; then
+      echo "Missing pre-requisite command $req!" >&2
+      exit 2
+    fi
+  done
+}
+
+function check_root() {
+  if [[ 'root' != "$(whoami)" ]]; then
+    echo "Must be root!" >&2
+    exit 2
+  fi
+}
+
+function validate_bridge() {
+  if ! brctl showstp "$1" &> /dev/null; then
+    echo "Could not find bridge device $1!" >&2
+    echo "Did you create it with \`brctl addbr $1'?" >&2
+    return 1
+  fi
+  return 0
+}
+
+function validate_rootfs_path() {
+  if ! [[ -d "$1" && -r "$1" && -x "$1" ]]; then
+    echo "Root path $1 does not exist or is unreadable!" >&2
+    return 1
+  fi
+  # shellcheck disable=SC2155
+  declare init="$(get_init "$1")"
+  if ! [[ -f "$init" && -r "$init" && -x "$init" ]]; then
+    echo "System init binary does not exist or is not executable at $init!" >&2
+    echo "Is this an operating system container?" \
+         "Did you forget to install systemd-sysv?" >&2
+    return 1
+  fi
+  return 0
+}
+
+function validate_ipv4_addr() {
+  return 0  # TODO
+}
+
+function validate_route() {
+  return 0  # TODO
+}
+
+function usage() {
+  cat <<EOF
+Usage: $progname -b <bridge> -p <root> -a <ip> -r <route>
+  Start the operating system container at path <root>. Create a veth pair with
+  the IPv4 address <ip> attached to the bridge device <bridge>, add a default
+  route via <route>.
+EOF
+}
+
+function parse_args() {
+  while getopts ":hb:p:a:r:" opt "$@"; do
+    case "$opt" in
+      'b')
+        validate_bridge "$OPTARG" || exit 2
+        bridge="$OPTARG"
+        ;;
+      'p')
+        validate_rootfs_path "$OPTARG" || exit 2
+        rootfs_path="$OPTARG"
+        ;;
+      'a')
+        validate_ipv4_addr "$OPTARG" || exit 2
+        ip_addr="$OPTARG"
+        ;;
+      'r')
+        validate_route "$OPTARG" || exit 2
+        route="$OPTARG"
+        ;;
+      'h')
+        usage "$1"
+        exit 0
+        ;;
+      '?')
+        echo "Invalid option -$OPTARG!" >&2
+        exit 2
+        ;;
+      ':')
+        echo "Missing argument to -$OPTARG!" >&2
+        exit 2
+        ;;
+    esac
+  done
+
+  shift $((OPTIND - 1))
+  cmd="$1"
+
+  if [[ -z "$bridge" || -z "$rootfs_path" \
+     || -z "$ip_addr" || -z "$route" ]]; then
+    echo "Missing one or more required options!" >&2
+    exit 2
+  fi
+}
+
+function prepare_devtmpfs() {
+  # shellcheck disable=SC2155
+  declare dev_path="$(get_dev_path "$rootfs_path")"
+
+  # create a fake devtmpfs
+  mount -t tmpfs -o nosuid,mode=755 devtmpfs "$dev_path"
+
+  # create and mount /dev/pts and /dev/shm
+  mkdir "$dev_path/pts" "$dev_path/shm"
+  mount -t devpts -o nosuid,noexec devpts "$dev_path/pts"
+  mount -t tmpfs -o nosuid,nodev tmpfs "$dev_path/shm"
+
+  ln -s '/proc/self/fd' "$dev_path/fd"
+  ln -s '/proc/self/fd/0' "$dev_path/stdin"
+  ln -s '/proc/self/fd/1' "$dev_path/stdout"
+  ln -s '/proc/self/fd/2' "$dev_path/stderr"
+
+  # pty created by socat is gurenteed to be 0
+  ln -s 'pts/0' "$dev_path/console"
+
+  mknod "$dev_path/tty" c 5 0
+  mknod "$dev_path/ptmx" c 5 2
+
+  mknod "$dev_path/null" c 1 3
+  mknod "$dev_path/zero" c 1 5
+  mknod "$dev_path/full" c 1 7
+  mknod "$dev_path/random" c 1 8
+  mknod "$dev_path/urandom" c 1 9
+}
+
+function setup_mounts() {
+  # shellcheck disable=SC2155
+  declare dev_path="$(get_dev_path "$rootfs_path")"
+
+  prepare_devtmpfs
+
+  # Replace this roots /dev with the childs dev.
+  umount -R /dev
+  mount --bind "$dev_path" /dev
+  mount --bind "$dev_path/pts" /dev/pts
+}
+
+function bootstrap_payload() {
+  # shellcheck disable=SC2155
+  declare dev_path="$(get_dev_path "$rootfs_path")"
+
+  declare exec_cmd=(
+    unshare --ipc --uts --cgroup --pid --fork
+    chroot "$rootfs_path" /sbin/init)
+  declare socat_exec_opts='pty,ctty,rawer,stderr,sane,setsid,sigint'
+
+  # shellcheck disable=SC2140
+  exec socat \
+    file:/dev/tty,rawer,cloexec \
+    EXEC:"${exec_cmd[*]}","$socat_exec_opts"
+}
+
+# TODO: this sucks, find a better solution.
+function find_host_veth() {
+  declare host_veth
+
+  while :; do
+    host_veth="$(printf 'veth%x\n' "$RANDOM")"
+    if ! ip link show "$host_veth" &> /dev/null; then
+      echo "$host_veth"
+      break
+    fi
+  done
+}
+
+function create_veth_pair() {
+  mkdir -p '/var/run/netns'
+  if ! [[ -f '/proc/1/ns/net' ]]; then
+    ln -s "/proc/1/ns/net" "/var/run/netns/1"
+  fi
+
+  declare raw_ip="${ip_addr%/*}"
+  # shellcheck disable=SC2155
+  declare host_veth="$(find_host_veth)"
+
+  ip link add eth0 type veth peer name "$host_veth" netns 1
+
+  ip -n 1 link set "$host_veth" master "$bridge"
+  ip -n 1 link set "$host_veth" up
+
+  ip link set eth0 up
+  ip addr add "$ip_addr" dev eth0
+  ip route add "$route" dev eth0 src "$raw_ip"
+  ip route add default via "$route" dev eth0 src "$raw_ip"
+}
+
+function stage1() {
+  exec unshare --mount --net -- "$progname" \
+    -b "$bridge" \
+    -p "$rootfs_path" \
+    -a "$ip_addr" \
+    -r "$route" \
+    stage2
+}
+
+function stage2() {
+  setup_mounts
+  create_veth_pair
+  bootstrap_payload
+}
+
+function main() {
+  check_root
+  check_prereqs
+
+  parse_args "$@"
+
+  case "$cmd" in
+    'stage2')
+      stage2
+      ;;
+    ''|'stage1')
+      stage1
+      ;;
+    *)
+      echo "Unrecognized command argument $cmd!" >&2
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"
+
+# vim: set ts=2 sw=2 et syn=sh:
