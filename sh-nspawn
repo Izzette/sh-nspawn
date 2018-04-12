@@ -143,14 +143,14 @@ function prepare_devtmpfs() {
   # pty created by socat is gurenteed to be 0
   ln -s 'pts/0' "$dev_path/console"
 
-  mknod "$dev_path/tty" c 5 0
-  mknod "$dev_path/ptmx" c 5 2
+  mknod -m 0666 "$dev_path/tty" c 5 0
+  mknod -m 0666 "$dev_path/ptmx" c 5 2
 
-  mknod "$dev_path/null" c 1 3
-  mknod "$dev_path/zero" c 1 5
-  mknod "$dev_path/full" c 1 7
-  mknod "$dev_path/random" c 1 8
-  mknod "$dev_path/urandom" c 1 9
+  mknod -m 0666 "$dev_path/null" c 1 3
+  mknod -m 0666 "$dev_path/zero" c 1 5
+  mknod -m 0666 "$dev_path/full" c 1 7
+  mknod -m 0666 "$dev_path/random" c 1 8
+  mknod -m 0666 "$dev_path/urandom" c 1 9
 }
 
 function setup_mounts() {
