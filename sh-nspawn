@@ -69,7 +69,7 @@ function validate_route() {
 
 function usage() {
   cat <<EOF
-Usage: $progname -b <bridge> -p <root> -a <ip> -r <route>
+Usage: $progname -p <root> -b <bridge> -a <ip> -r <route>
   Start the operating system container at path <root>. Create a veth pair with
   the IPv4 address <ip> attached to the bridge device <bridge>, add a default
   route via <route>.
