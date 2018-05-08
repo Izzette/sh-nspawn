@@ -83,7 +83,6 @@ function parse_args() {
   while getopts ":hb:p:a:r:" opt "$@"; do
     case "$opt" in
       'b')
-        validate_bridge "$OPTARG" || exit 2
         bridge="$OPTARG"
         ;;
       'p')
@@ -260,6 +259,7 @@ function main() {
       stage2
       ;;
     ''|'stage1')
+      validate_bridge "$bridge" || exit 2
       stage1
       ;;
     *)
