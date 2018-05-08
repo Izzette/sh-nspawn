@@ -193,7 +193,7 @@ function bootstrap_payload() {
 # Create a named net namespace compatible with ip's `-n' option.
 function create_init_netns() {
   mkdir -p '/var/run/netns'
-  if ! [[ -f '/proc/1/ns/net' ]]; then
+  if ! [[ -f '/var/run/netns/1' ]]; then
     ln -s "/proc/1/ns/net" "/var/run/netns/1"
   fi
 }
