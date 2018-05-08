@@ -24,10 +24,9 @@ for setup.
 
 ## Requirements
 
-The host requirements are intentionally kept simple; however, they require
-newer versions of some software.  Although sh-nspawn has only been tested on
-Debian stretch, it is expected to work so long as the following requirements are
-met:
+The host requirements are intentionally kept simple; however, they require newer
+versions of some software.  Although sh-nspawn has only been tested on Debian
+stretch, it is expected to work so long as the following requirements are met:
 
 * socat, at least version 1.7.3.0
   * `rawer` termios option added (see
@@ -115,6 +114,9 @@ option; the IP you've chosen for your bride must be passed to the `-r`.  You'll
 then need to select an unused IP address on the subnet you've chosen and use it
 for the `-a` option.
 
+Finally, start the container with `./sh-nspawn -p /var/lib/containers/myct -b
+mybr0 -a 172.34.44.2/24 -r 172.34.44.1`, you should be able to log into the
+console with the password you set.
 
 ## License
 
