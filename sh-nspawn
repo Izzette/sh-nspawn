@@ -51,9 +51,10 @@ function validate_rootfs_path() {
     return 1
   fi
   # shellcheck disable=SC2155
-  declare init="$1$init"
-  if ! [[ -f "$init" && -r "$init" && -x "$init" ]]; then
-    echo "System init binary does not exist or is not executable at $init!" >&2
+  declare rel_init="$1$init"
+  if ! [[ -f "$rel_init" && -r "$rel_init" && -x "$rel_init" ]]; then
+    echo "System init binary does not exist or is not executable at" \
+         "$rel_init!" >&2
     echo "Is this an operating system container?" \
          "Did you forget to install systemd-sysv?" >&2
     return 1
