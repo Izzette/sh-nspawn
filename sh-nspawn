@@ -180,7 +180,8 @@ function bootstrap_payload() {
 
   declare exec_cmd=(
     unshare --ipc --uts --cgroup --pid --fork
-    chroot "$rootfs_path" "$init")
+    env -i
+    "$(command -v chroot)" "$rootfs_path" "$init")
   declare socat_exec_opts='pty,ctty,rawer,stderr,sane,setsid,sigint'
 
   # shellcheck disable=SC2140
